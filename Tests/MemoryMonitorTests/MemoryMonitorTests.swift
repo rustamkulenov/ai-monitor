@@ -17,6 +17,59 @@ func assert(_ condition: Bool, _ message: String, file: String = #file, line: In
     }
 }
 
+// MARK: - LLM test helpers
+
+/// Stub URL protocol so status reporter tests don't depend on real services.
+final class StubURLProtocol: URLProtocol {
+    nonisolated(unsafe) static var statusCode = 200
+    nonisolated(unsafe) static var shouldFail = false
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        if Self.shouldFail {
+            client?.urlProtocol(self, didFailWithError: URLError(.cannotConnectToHost))
+            return
+        }
+
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: Self.statusCode,
+            httpVersion: nil,
+            headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data())
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+func stubSession() -> URLSession {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [StubURLProtocol.self]
+    return URLSession(configuration: configuration)
+}
+
+/// Runs an async status check from the synchronous test runner.
+func waitForStatus(_ reporter: any LLMStatusReporter) -> LLMServiceStatus {
+    final class Result: @unchecked Sendable {
+        var value: LLMServiceStatus = .off
+    }
+
+    let result = Result()
+    let semaphore = DispatchSemaphore(value: 0)
+
+    Task {
+        result.value = await reporter.checkStatus()
+        semaphore.signal()
+    }
+
+    semaphore.wait()
+    return result.value
+}
+
 // MARK: - Test cases
 
 func testCollectRunsWithoutError() {
@@ -172,6 +225,54 @@ func testMultipleCollectCallsConsistent() {
            "Page size consistent across 5 calls (\(MemoryMonitor.formatBytes(UInt64(pageSizes[0]))))")
 }
 
+func testLLMReportersConfiguration() {
+    print("\n── testLLMReportersConfiguration ──")
+    let ollama = OllamaStatusReporter()
+    let lmStudio = LMStudioStatusReporter()
+
+    assert(ollama.name == "Ollama", "Ollama reporter name is \"Ollama\"")
+    assert(ollama.endpoint.port == 11434,
+           "Ollama endpoint uses localhost:11434 (got \(ollama.endpoint.absoluteString))")
+    assert(ollama.healthCheckURL.path == "/api/tags",
+           "Ollama health check path is /api/tags (got \(ollama.healthCheckURL.path))")
+
+    assert(lmStudio.name == "LM Studio", "LM Studio reporter name is \"LM Studio\"")
+    assert(lmStudio.endpoint.port == 1234,
+           "LM Studio endpoint uses localhost:1234 (got \(lmStudio.endpoint.absoluteString))")
+    assert(lmStudio.healthCheckURL.path == "/v1/models",
+           "LM Studio health check path is /v1/models (got \(lmStudio.healthCheckURL.path))")
+}
+
+func testLLMReportersReportOnline() {
+    print("\n── testLLMReportersReportOnline ──")
+    StubURLProtocol.statusCode = 200
+    StubURLProtocol.shouldFail = false
+
+    let session = stubSession()
+    assert(waitForStatus(OllamaStatusReporter(session: session)) == .on,
+           "Ollama reports On when its API returns 200")
+    assert(waitForStatus(LMStudioStatusReporter(session: session)) == .on,
+           "LM Studio reports On when its API returns 200")
+}
+
+func testLLMReportersReportOffline() {
+    print("\n── testLLMReportersReportOffline ──")
+    let session = stubSession()
+
+    StubURLProtocol.shouldFail = false
+    StubURLProtocol.statusCode = 500
+    assert(waitForStatus(OllamaStatusReporter(session: session)) == .off,
+           "Ollama reports Off when its API returns 500")
+    assert(waitForStatus(LMStudioStatusReporter(session: session)) == .off,
+           "LM Studio reports Off when its API returns 500")
+
+    StubURLProtocol.shouldFail = true
+    assert(waitForStatus(OllamaStatusReporter(session: session)) == .off,
+           "Ollama reports Off when the connection fails")
+    assert(waitForStatus(LMStudioStatusReporter(session: session)) == .off,
+           "LM Studio reports Off when the connection fails")
+}
+
 // MARK: - Main
 
 print("Running MemoryMonitor tests...\n")
@@ -188,6 +289,9 @@ testFormatBytesBasic()
 testFormatBytesFractional()
 testFormatBytesClampsToTB()
 testMultipleCollectCallsConsistent()
+testLLMReportersConfiguration()
+testLLMReportersReportOnline()
+testLLMReportersReportOffline()
 
 print("\n═══════════════════════════════════════")
 print("Results: \(passed) passed, \(failed) failed")
