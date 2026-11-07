@@ -27,56 +27,45 @@ private func sysctlInt32(_ name: String) -> Int32? {
     return value
 }
 
-private func formatBytes(_ bytes: UInt64) -> String {
-    let units = ["B", "KB", "MB", "GB", "TB"]
-    var size = Double(bytes)
-    var unitIndex = 0
-    while size >= 1024.0 && unitIndex < units.count - 1 {
-        size /= 1024.0
-        unitIndex += 1
-    }
-    return String(format: "%.2f %@", size, units[unitIndex])
-}
-
 // MARK: - MemoryInfo
 
-struct MemoryInfo {
-    var total: UInt64 = 0
-    var used: UInt64 = 0
-    var free: UInt64 = 0
-    var active: UInt64 = 0
-    var inactive: UInt64 = 0
-    var wired: UInt64 = 0
-    var external: UInt64 = 0
-    var speculative: UInt64 = 0
-    var pageable: UInt64 = 0
-    var purgeable: UInt64 = 0
+public struct MemoryInfo {
+    public var total: UInt64 = 0
+    public var used: UInt64 = 0
+    public var free: UInt64 = 0
+    public var active: UInt64 = 0
+    public var inactive: UInt64 = 0
+    public var wired: UInt64 = 0
+    public var external: UInt64 = 0
+    public var speculative: UInt64 = 0
+    public var pageable: UInt64 = 0
+    public var purgeable: UInt64 = 0
 
-    var usagePercent: Double {
+    public var usagePercent: Double {
         total > 0 ? Double(used) / Double(total) * 100.0 : 0
     }
 }
 
 // MARK: - SwapInfo
 
-struct SwapInfo {
-    var total: UInt64 = 0
-    var used: UInt64 = 0
-    var free: UInt64 = 0
+public struct SwapInfo {
+    public var total: UInt64 = 0
+    public var used: UInt64 = 0
+    public var free: UInt64 = 0
 
-    var usagePercent: Double {
+    public var usagePercent: Double {
         total > 0 ? Double(used) / Double(total) * 100.0 : 0
     }
 }
 
 // MARK: - PressureInfo
 
-enum MemoryPressure {
+public enum MemoryPressure {
     case green
     case yellow
     case red
 
-    var description: String {
+    public var description: String {
         switch self {
         case .green: return "Green (Normal)"
         case .yellow: return "Yellow (Warning)"
@@ -87,10 +76,22 @@ enum MemoryPressure {
 
 // MARK: - MemoryMonitor
 
-enum MemoryMonitor {
+public enum MemoryMonitor {
+
+    /// Format bytes into a human-readable string (B, KB, MB, GB, TB)
+    public static func formatBytes(_ bytes: UInt64) -> String {
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        var size = Double(bytes)
+        var unitIndex = 0
+        while size >= 1024.0 && unitIndex < units.count - 1 {
+            size /= 1024.0
+            unitIndex += 1
+        }
+        return String(format: "%.2f %@", size, units[unitIndex])
+    }
 
     /// Collect comprehensive memory information from the system
-    static func collect() -> (memory: MemoryInfo, swap: SwapInfo, pressure: MemoryPressure, pageSize: Int) {
+    public static func collect() -> (memory: MemoryInfo, swap: SwapInfo, pressure: MemoryPressure, pageSize: Int) {
         var memory = MemoryInfo()
         var swap = SwapInfo()
         var pressure = MemoryPressure.green
@@ -104,30 +105,35 @@ enum MemoryMonitor {
             memory.total = total
         }
 
-        // Get vm_statistics
-        var vmStat = vm_statistics_data_t()
-        var count: mach_msg_type_number_t = mach_msg_type_number_t(MemoryLayout<vm_statistics_data_t>.size)
+        // Get vm_statistics64 (modern macOS API).
+        // Swift's imported vm_statistics64_data_t matches the kernel struct (248 bytes,
+        // HOST_VM_INFO64_COUNT = 62 on macOS). Use it directly rather than guessing
+        // offsets from a raw buffer, since field widths mix natural_t and uint64_t.
+        var vmStats = vm_statistics64()
+        var count = mach_msg_type_number_t(
+            MemoryLayout<vm_statistics64_data_t>.size / MemoryLayout<integer_t>.size)
         let host = mach_host_self()
 
-        var result: kern_return_t = KERN_FAILURE
-        withUnsafeMutablePointer(to: &vmStat) { ptr in
-            result = host_statistics(host, HOST_VM_INFO,
-                                     ptr.withMemoryRebound(to: natural_t.self, capacity: 1) { $0 },
-                                     &count)
+        // HOST_VM_INFO64 = 4 (defined in mach/host_info.h)
+        let HOST_VM64_INFO: host_flavor_t = 4
+
+        let result: kern_return_t = withUnsafeMutablePointer(to: &vmStats) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                host_statistics64(host, HOST_VM64_INFO, $0, &count)
+            }
         }
 
         if result == KERN_SUCCESS {
             let pageSize = UInt64(getpagesize())
 
-            // Access vm_statistics_data_t fields by name (correct macOS layout)
-            memory.free       = UInt64(vmStat.free_count) * pageSize
-            memory.active     = UInt64(vmStat.active_count) * pageSize
-            memory.inactive   = UInt64(vmStat.inactive_count) * pageSize
-            memory.speculative = UInt64(vmStat.speculative_count) * pageSize
-            memory.wired      = UInt64(vmStat.wire_count) * pageSize
-            // macOS vm_statistics does not expose pageable/purgeable/external
+            memory.free       = UInt64(vmStats.free_count) * pageSize
+            memory.active     = UInt64(vmStats.active_count) * pageSize
+            memory.inactive   = UInt64(vmStats.inactive_count) * pageSize
+            memory.speculative = UInt64(vmStats.speculative_count) * pageSize
+            memory.wired      = UInt64(vmStats.wire_count) * pageSize
+            memory.purgeable  = UInt64(vmStats.purgeable_count) * pageSize
+            // macOS vm_statistics64 does not expose pageable/external
             memory.pageable   = 0
-            memory.purgeable  = 0
             memory.external   = 0
 
             // Used = total - (free * pageSize)
@@ -157,7 +163,7 @@ enum MemoryMonitor {
     }
 
     /// Print formatted memory report to console
-    static func printReport() {
+    public static func printReport() {
         let (memory, swap, pressure, pageSize) = collect()
 
         let separator = String(repeating: "═", count: 60)

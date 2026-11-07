@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import MemoryMonitorLib
 
 // MARK: - MenuBarApp
 
@@ -42,12 +43,21 @@ enum MenuBarApp {
             statusItem.button?.title = displayText
 
             // Update menu text
+            let pressureLabel: String
+            switch pressure {
+            case .green:   pressureLabel = "Normal"
+            case .yellow:  pressureLabel = "Warning"
+            case .red:     pressureLabel = "Critical"
+            }
             let usageText = String(format: "%.1f%% used (%.1f%% free)", memory.usagePercent, freePercent)
             if let item = menu.item(at: 0) {
                 item.title = usageText
             }
         }
         RunLoop.main.add(timer, forMode: .default)
+
+        // Prevent the timer from being deallocated when main() returns
+        _ = timer
 
         // Run the event loop
         NSApp.run()
