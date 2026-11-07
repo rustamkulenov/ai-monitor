@@ -76,10 +76,9 @@ enum MenuBarApp {
             llmStatusItem.refresh()
         }
 
-        // Update loop: every 2 seconds
-        let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
+        // Update loop: every 5 seconds
+        let timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
             let (memory, _, pressure, _) = MemoryMonitor.collect()
-            let freePercent = 100.0 - memory.usagePercent
             let pressureSymbol: String
             switch pressure {
             case .green:   pressureSymbol = "●"
@@ -87,11 +86,11 @@ enum MenuBarApp {
             case .red:     pressureSymbol = "⚠"
             }
 
-            let displayText = String(format: "%d%% %@", Int(freePercent), pressureSymbol)
+            let displayText = String(format: "%d%% %@", Int(memory.usagePercent), pressureSymbol)
             statusItem.button?.title = displayText
 
             // Update menu text
-            let usageText = String(format: "%.1f%% used (%.1f%% free)", memory.usagePercent, freePercent)
+            let usageText = String(format: "%.1f%% used", memory.usagePercent)
             if let item = menu.item(at: 0) {
                 item.title = usageText
             }
