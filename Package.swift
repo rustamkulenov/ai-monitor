@@ -8,6 +8,7 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "MemoryMonitor",
-            path: "Sources"),
+            path: "Sources",
+            linkerSettings: [.linkedFramework("AppKit")]),
     ]
 )
