@@ -80,7 +80,7 @@ func testCollectRunsWithoutError() {
 
 func testCollectReturnsValidTuple() {
     print("\n── testCollectReturnsValidTuple ──")
-    let (memory, swap, _, pageSize) = MemoryMonitor.collect()
+    let (memory, swap, _, pageSize, _, _) = MemoryMonitor.collect()
 
     assert(memory.total > 0,
            "Total memory is reported (\(MemoryMonitor.formatBytes(memory.total)))")
@@ -105,7 +105,7 @@ func testCollectReturnsValidTuple() {
 
 func testMemoryUsagePercent() {
     print("\n── testMemoryUsagePercent ──")
-    let (memory, _, _, _) = MemoryMonitor.collect()
+    let (memory, _, _, _, _, _) = MemoryMonitor.collect()
 
     assert(memory.usagePercent > 0, "Usage percent is greater than zero (\(String(format: "%.2f", memory.usagePercent))%)")
     assert(memory.usagePercent <= 100, "Usage percent ≤ 100% (\(String(format: "%.2f", memory.usagePercent))%)")
@@ -113,7 +113,7 @@ func testMemoryUsagePercent() {
 
 func testMemoryFieldsAreReasonable() {
     print("\n── testMemoryFieldsAreReasonable ──")
-    let (memory, _, _, _) = MemoryMonitor.collect()
+    let (memory, _, _, _, _, _) = MemoryMonitor.collect()
 
     let twoGB: UInt64 = 2 * 1024 * 1024 * 1024
     assert(memory.total > twoGB,
@@ -124,7 +124,7 @@ func testMemoryFieldsAreReasonable() {
 
 func testSwapInfoPopulated() {
     print("\n── testSwapInfoPopulated ──")
-    let (_, swap, _, _) = MemoryMonitor.collect()
+    let (_, swap, _, _, _, _) = MemoryMonitor.collect()
 
     print("  Reported swap: total \(MemoryMonitor.formatBytes(swap.total))"
         + " | used \(MemoryMonitor.formatBytes(swap.used))"
@@ -149,7 +149,7 @@ func testSwapInfoPopulated() {
 
 func testSwapUsagePercent() {
     print("\n── testSwapUsagePercent ──")
-    let (_, swap, _, _) = MemoryMonitor.collect()
+    let (_, swap, _, _, _, _) = MemoryMonitor.collect()
 
     guard swap.total > 0 else {
         assert(swap.usagePercent == 0, "Swap usage percent is 0 when total is 0")
@@ -166,7 +166,7 @@ func testSwapUsagePercent() {
 
 func testPressureIsValidCase() {
     print("\n── testPressureIsValidCase ──")
-    let (_, _, pressure, _) = MemoryMonitor.collect()
+    let (_, _, pressure, _, _, _) = MemoryMonitor.collect()
 
     switch pressure {
     case .green, .yellow, .red:

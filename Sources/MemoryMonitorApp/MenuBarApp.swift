@@ -1,10 +1,8 @@
 import AppKit
+import SwiftUI
 import Foundation
 import MemoryMonitorLib
 
-// MARK: - LLM status menu item
-
-/// Owns one menu item and keeps its title in sync with a reporter's status.
 private final class LLMStatusMenuItem {
     let reporter: any LLMStatusReporter
     let item: NSMenuItem
@@ -16,42 +14,100 @@ private final class LLMStatusMenuItem {
         self.item.isEnabled = false
     }
 
-    /// Refreshes the status in the background and updates the menu item on the main thread.
     func refresh() {
         guard !isChecking else { return }
         isChecking = true
 
         Task { @MainActor in
             let status = await reporter.checkStatus()
-            item.title = "\(reporter.name): \(status.label)"
+            item.title = "\(status.label) \(reporter.name)"
             isChecking = false
         }
     }
 }
 
-// MARK: - MenuBarApp
+private final class MemoryUsageView: NSView {
+
+    private let history = MemoryHistory(capacity: 20)
+
+    private var pressure: MemoryPressure = .green
+    private var wiredPercent: Double = 0
+    private var usagePercent: Double = 0
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        translatesAutoresizingMaskIntoConstraints = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func update(wiredPercent: Double, memoryUsage: Double, pressure: MemoryPressure) {
+        self.wiredPercent = wiredPercent
+        self.usagePercent = memoryUsage
+        self.pressure = pressure
+        history.append(wiredPercent)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let font = NSFont.systemFont(ofSize: 12)
+        let textAttributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor.labelColor,
+            .font: font,
+        ]
+
+        let wiredLine = String(format: "%.1f%% Wired Memory", wiredPercent)
+        let usageLine = String(format: "%.1f%% Usage", usagePercent)
+        let fullText = "\(wiredLine)\n\(usageLine)"
+
+        let textRect = NSRect(x: 16, y: 2, width: bounds.width - 16 - 48 - 16, height: bounds.height - 4)
+        fullText.draw(in: textRect, withAttributes: textAttributes)
+
+        let chart = SparklineChart(
+            data: history.readings(),
+            width: 48,
+            height: 24,
+            lineWidth: 1.2,
+            colorScheme: chartColorScheme
+        )
+        let chartImage = chart.image
+        let chartX = bounds.width - chartImage.size.width - 16
+        let chartY = (bounds.height - chartImage.size.height) / 2
+        chartImage.draw(in: NSRect(x: chartX, y: chartY, width: chartImage.size.width, height: chartImage.size.height))
+    }
+
+    private var chartColorScheme: SparklineChart.ColorScheme {
+        switch pressure {
+        case .green:  return .green
+        case .yellow: return .yellow
+        case .red:    return .red
+        }
+    }
+}
 
 enum MenuBarApp {
 
     static func main() {
-        // Ensure AppKit is loaded
         let _ = NSApplication.shared
 
-        // Create status item with variable length (auto-sizes to content)
         let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
-        // Build a simple menu
         let menu = NSMenu()
         menu.title = "Memory Monitor"
 
-        let memoryMenuItem = NSMenuItem(title: "Memory Usage", action: nil, keyEquivalent: "")
-        memoryMenuItem.isEnabled = false
+        let memoryView = MemoryUsageView(frame: NSRect(x: 0, y: 0, width: 140, height: 36))
+        let memoryMenuItem = NSMenuItem()
+        memoryMenuItem.view = memoryView
         menu.addItem(memoryMenuItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        // LLM services (local REST APIs)
-        let llmHeader = NSMenuItem(title: "LLM Services", action: nil, keyEquivalent: "")
+        menu.addItem(NSMenuItem.separator())
+        let llmHeader = NSMenuItem(title: "Local LLM Services", action: nil, keyEquivalent: "")
         llmHeader.isEnabled = false
         menu.addItem(llmHeader)
 
@@ -71,14 +127,13 @@ enum MenuBarApp {
 
         statusItem.menu = menu
 
-        // Prime the LLM statuses immediately instead of waiting for the first tick.
         for llmStatusItem in llmStatusItems {
             llmStatusItem.refresh()
         }
 
-        // Update loop: every 5 seconds
-        let timer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
-            let (memory, _, pressure, _) = MemoryMonitor.collect()
+        let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+            let sample = MemoryMonitor.collect()
+            let (memory, _, pressure, _, _, _) = sample
             let pressureSymbol: String
             switch pressure {
             case .green:   pressureSymbol = "●"
@@ -86,26 +141,21 @@ enum MenuBarApp {
             case .red:     pressureSymbol = "⚠"
             }
 
-            let displayText = String(format: "%d%% %@", Int(memory.usagePercent), pressureSymbol)
+            let displayText = String(format: "%d%% %@", Int(memory.wiredPercent), pressureSymbol)
             statusItem.button?.title = displayText
 
-            // Update menu text
-            let usageText = String(format: "%.1f%% used", memory.usagePercent)
-            if let item = menu.item(at: 0) {
-                item.title = usageText
-            }
+            memoryView.update(wiredPercent: memory.wiredPercent, memoryUsage: memory.usagePercent, pressure: pressure)
 
-            // Refresh LLM service statuses
             for llmStatusItem in llmStatusItems {
                 llmStatusItem.refresh()
             }
         }
         RunLoop.main.add(timer, forMode: .default)
 
-        // Prevent the timer from being deallocated when main() returns
         _ = timer
 
-        // Run the event loop
         NSApp.run()
     }
 }
+
+
