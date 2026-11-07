@@ -119,33 +119,28 @@ enum MemoryMonitor {
         if result == KERN_SUCCESS {
             let pageSize = UInt64(getpagesize())
 
-            // Access fields via withUnsafePointer
-            withUnsafePointer(to: vmStat) { ptr in
-                let base = ptr.withMemoryRebound(to: natural_t.self, capacity: 1) { $0 }
-                memory.active     = UInt64(base[0]) * pageSize
-                memory.inactive   = UInt64(base[1]) * pageSize
-                memory.wired      = UInt64(base[2]) * pageSize
-                memory.external   = UInt64(base[4]) * pageSize
-                memory.speculative = UInt64(base[5]) * pageSize
-                memory.pageable   = UInt64(base[6]) * pageSize
-                memory.purgeable  = UInt64(base[7]) * pageSize
-            }
+            // Access vm_statistics_data_t fields by name (correct macOS layout)
+            memory.free       = UInt64(vmStat.free_count) * pageSize
+            memory.active     = UInt64(vmStat.active_count) * pageSize
+            memory.inactive   = UInt64(vmStat.inactive_count) * pageSize
+            memory.speculative = UInt64(vmStat.speculative_count) * pageSize
+            memory.wired      = UInt64(vmStat.wire_count) * pageSize
+            // macOS vm_statistics does not expose pageable/purgeable/external
+            memory.pageable   = 0
+            memory.purgeable  = 0
+            memory.external   = 0
 
-            // Used = active + wired + external
-            memory.used = memory.active + memory.wired + memory.external
-            // Free = total - used
-            memory.free = memory.total > memory.used ? memory.total - memory.used : 0
+            // Used = total - (free * pageSize)
+            memory.used = memory.total > memory.free ? memory.total - memory.free : 0
         }
 
-        // Swap usage via sysctl
-        if let swapTotal = sysctlInt64("vm.swapusage.total") {
-            swap.total = UInt64(swapTotal)
-        }
-        if let swapUsed = sysctlInt64("vm.swapusage.used") {
-            swap.used = UInt64(swapUsed)
-        }
-        if let swapFree = sysctlInt64("vm.swapusage.free") {
-            swap.free = UInt64(swapFree)
+        // Swap usage via sysctl (vm.swapusage returns struct xsw_usage)
+        var swapInfo = xsw_usage()
+        var swapSize = MemoryLayout<xsw_usage>.size
+        if sysctlbyname("vm.swapusage", &swapInfo, &swapSize, nil, 0) == 0 {
+            swap.total = UInt64(swapInfo.xsu_total)
+            swap.used = UInt64(swapInfo.xsu_used)
+            swap.free = UInt64(swapInfo.xsu_avail)
         }
 
         // Memory pressure via sysctl
