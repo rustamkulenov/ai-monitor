@@ -54,7 +54,7 @@ private final class MemoryUsageView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let font = NSFont.systemFont(ofSize: 12)
+        let font = NSFont.systemFont(ofSize: 11)
         let textAttributes: [NSAttributedString.Key: Any] = [
             .foregroundColor: NSColor.labelColor,
             .font: font,
@@ -131,7 +131,7 @@ enum MenuBarApp {
             llmStatusItem.refresh()
         }
 
-        let timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
             let sample = MemoryMonitor.collect()
             let (memory, _, pressure, _, _, _) = sample
             let pressureSymbol: String

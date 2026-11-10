@@ -25,15 +25,7 @@ Memory data is collected with native system calls (`sysctl`, `host_statistics64`
 
 ## Menu preview
 
-```
-Memory Usage                  
-──────────────────────────────
-LLM Services                  
-Ollama: On
-LM Studio: Off
-──────────────────────────────
-Quit                    ⌘Q
-```
+![menu](./menu.png)
 
 The status-bar title shows free memory and pressure, for example:
  ```
